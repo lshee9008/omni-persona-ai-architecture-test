@@ -1,9 +1,17 @@
+import 'package:hive/hive.dart';
+
+// 자동 생성될 파일 이름 지정
+part 'chat_message.g.dart';
+
+@HiveType(typeId: 0)
 class ChatMessage {
-  final String role; // 'user' 또는 'assistant'
+  @HiveField(0)
+  final String role;
+
+  @HiveField(1)
   final String content;
 
   ChatMessage({required this.role, required this.content});
 
-  // FastAPI로 보낼 때 JSON으로 변환
   Map<String, dynamic> toJson() => {'role': role, 'content': content};
 }

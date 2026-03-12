@@ -1,41 +1,62 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 import 'package:uuid/uuid.dart';
 import '../models/chat_message.dart';
 import '../services/api_service.dart';
 
-// API 서비스 Provider
 final apiServiceProvider = Provider((ref) => ApiService());
-
-// 고유 세션 ID 생성 (앱 실행 시 한 번 생성)
 final sessionIdProvider = Provider((ref) => const Uuid().v4());
 
-// 채팅 목록 상태를 관리하는 Notifier
 class ChatNotifier extends StateNotifier<List<ChatMessage>> {
-  ChatNotifier(this.ref) : super([]);
+  ChatNotifier(this.ref) : super([]) {
+    _loadMessagesFromHive(); // 객체 생성 시 로컬 DB에서 데이터 불러오기
+  }
 
   final Ref ref;
-  bool isLoading = false; // AI 응답 대기 상태
+  bool isLoading = false;
+  final Box<ChatMessage> _chatBox = Hive.box<ChatMessage>('chat_box');
+
+  // 로컬 DB(Hive)에서 기존 대화 불러오기
+  void _loadMessagesFromHive() {
+    if (_chatBox.isNotEmpty) {
+      state = _chatBox.values.toList();
+    }
+  }
+
+  // 상태 업데이트 및 Hive 저장 공통 메서드
+  void _addMessageAndSave(ChatMessage message) {
+    state = [...state, message];
+    _chatBox.add(message); // 로컬 DB에 추가
+  }
 
   Future<void> sendMessage(String text) async {
     if (text.trim().isEmpty) return;
 
-    // 1. 사용자 메시지를 상태에 추가 (UI 즉각 반영)
-    state = [...state, ChatMessage(role: 'user', content: text)];
+    // 1. 사용자 메시지 추가 및 저장
+    final userMessage = ChatMessage(role: 'user', content: text);
+    _addMessageAndSave(userMessage);
+
     isLoading = true;
 
-    // 2. API 호출
+    // 2. 백엔드(FastAPI) 호출
     final apiService = ref.read(apiServiceProvider);
     final sessionId = ref.read(sessionIdProvider);
 
     final aiReply = await apiService.sendMessage(sessionId, text);
 
-    // 3. AI 응답을 상태에 추가
+    // 3. AI 응답 추가 및 저장
     isLoading = false;
-    state = [...state, ChatMessage(role: 'assistant', content: aiReply)];
+    final aiMessage = ChatMessage(role: 'assistant', content: aiReply);
+    _addMessageAndSave(aiMessage);
+  }
+
+  // (선택 사항) 대화 기록 초기화 기능
+  Future<void> clearChat() async {
+    await _chatBox.clear();
+    state = [];
   }
 }
 
-// UI에서 접근할 Provider 선언
 final chatProvider = StateNotifierProvider<ChatNotifier, List<ChatMessage>>((
   ref,
 ) {
