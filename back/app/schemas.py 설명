@@ -1,0 +1,326 @@
+# FastAPI Chat API 데이터 모델 (Pydantic)
+```python
+from pydantic import BaseModel
+from typing import Optional
+
+class ChatRequest(BaseModel):
+    session_id: str
+    message: str
+    persona: Optional[str] = "친절하고 유능한 AI 어시스턴트" # 멀티 페르소나 설정용
+
+class ChatResponse(BaseModel):
+    reply: str
+```
+- 이 코드는 **FastAPI에서 채팅 요청(Request)과 응답(Response) 데이터 구조를 정의하는 Pydantic 모델**
+
+- Pydantic은 **데이터 검증(Data Validation)과 타입 검사(Type Checking)**를 자동으로 수행해주는 라이브러리
+
+---
+
+# 1. 필요한 라이브러리 import
+
+```python
+from pydantic import BaseModel
+from typing import Optional
+```
+
+| 라이브러리     | 설명                      |
+| --------- | ----------------------- |
+| BaseModel | Pydantic 데이터 모델의 기본 클래스 |
+| Optional  | 선택적(Optional) 필드 정의     |
+
+---
+
+# 2. ChatRequest 모델
+
+```python
+class ChatRequest(BaseModel):
+    session_id: str
+    message: str
+    persona: Optional[str] = "친절하고 유능한 AI 어시스턴트"
+```
+
+## 역할
+
+사용자가 **AI 챗봇에게 보내는 요청 데이터 구조**를 정의
+
+---
+
+## 필드 설명
+
+| 필드         | 타입             | 설명             |
+| ---------- | -------------- | -------------- |
+| session_id | str            | 사용자 세션 식별 ID   |
+| message    | str            | 사용자가 입력한 메시지   |
+| persona    | str (Optional) | AI 성격(페르소나) 설정 |
+
+---
+
+## session_id
+
+```python
+session_id: str
+```
+
+### 역할
+
+사용자의 **대화 세션을 구분하기 위한 ID**
+
+예시
+
+```
+user_123
+chat_session_001
+abc123xyz
+```
+
+### 사용 목적
+
+* 대화 기록 저장
+* Redis 세션 관리
+* 사용자별 대화 분리
+
+---
+
+## message
+
+```python
+message: str
+```
+
+### 역할
+
+사용자가 AI에게 보내는 **실제 질문 또는 메시지**
+
+예시
+
+```
+"오늘 날씨 어때?"
+"벌크업 식단 추천해줘"
+"파이썬으로 API 만드는 법 알려줘"
+```
+
+---
+
+## persona (멀티 페르소나 설정)
+
+```python
+persona: Optional[str] = "친절하고 유능한 AI 어시스턴트"
+```
+
+### 의미
+
+AI의 **대화 스타일 또는 캐릭터 설정**
+
+---
+
+### Optional 의미
+
+```python
+Optional[str]
+```
+
+값이 **있어도 되고 없어도 되는 필드**
+
+즉, 사용자가 보내지 않아도 기본값이 적용
+
+---
+
+### 기본값
+
+```
+친절하고 유능한 AI 어시스턴트
+```
+
+---
+
+### 예시
+
+요청 JSON
+
+```json
+{
+  "session_id": "user123",
+  "message": "파이썬 배우고 싶어"
+}
+```
+
+실제 내부 데이터
+
+```json
+{
+  "session_id": "user123",
+  "message": "파이썬 배우고 싶어",
+  "persona": "친절하고 유능한 AI 어시스턴트"
+}
+```
+
+---
+
+### 멀티 페르소나 예시
+
+```
+친절한 선생님
+까칠한 개발자
+헬스 트레이너
+뉴스 분석 전문가
+연애 상담가
+```
+
+예시 요청
+
+```json
+{
+  "session_id": "user123",
+  "message": "운동 루틴 알려줘",
+  "persona": "헬스 트레이너"
+}
+```
+
+---
+
+# 3. ChatResponse 모델
+
+```python
+class ChatResponse(BaseModel):
+    reply: str
+```
+
+## 역할
+
+AI가 사용자에게 **응답하는 데이터 구조**
+
+---
+
+## 필드 설명
+
+| 필드    | 타입  | 설명         |
+| ----- | --- | ---------- |
+| reply | str | AI가 생성한 답변 |
+
+---
+
+## 응답 예시
+
+```json
+{
+  "reply": "벌크업을 위해서는 단백질 섭취와 웨이트 트레이닝을 병행하는 것이 좋습니다."
+}
+```
+
+---
+
+# 4. API에서 사용하는 방식
+
+FastAPI에서 다음과 같이 사용할 수 있음
+
+```python
+@app.post("/chat", response_model=ChatResponse)
+async def chat(request: ChatRequest):
+
+    user_message = request.message
+
+    reply = "AI 응답 예시입니다."
+
+    return ChatResponse(reply=reply)
+```
+
+---
+
+# 5. 요청/응답 흐름
+
+```
+사용자
+   ↓
+ChatRequest(JSON)
+   ↓
+FastAPI
+   ↓
+AI 처리
+   ↓
+ChatResponse
+   ↓
+사용자
+```
+
+---
+
+# 6. 실제 API 요청 예시
+
+### Request
+
+```json
+{
+  "session_id": "user123",
+  "message": "FastAPI가 뭐야?",
+  "persona": "친절한 개발자"
+}
+```
+
+---
+
+### Response
+
+```json
+{
+  "reply": "FastAPI는 Python 기반의 고성능 웹 프레임워크입니다."
+}
+```
+
+---
+
+# 7. 이 구조의 장점
+
+### 1️⃣ 데이터 검증 자동화
+
+잘못된 요청 자동 차단
+
+예시
+
+```
+session_id = 숫자 → 오류
+message = 없음 → 오류
+```
+
+---
+
+### 2️⃣ 자동 API 문서 생성
+
+FastAPI는 Pydantic 모델을 기반으로 **Swagger 문서 자동 생성**
+
+접속
+
+```
+/docs
+```
+
+---
+
+### 3️⃣ 타입 안정성
+
+IDE에서 자동 완성 지원
+
+예시
+
+```python
+request.message
+request.session_id
+```
+
+---
+
+# 8. 전체 구조
+
+```
+User Request
+   ↓
+ChatRequest (Pydantic)
+   ↓
+FastAPI Endpoint
+   ↓
+AI Processing
+   ↓
+ChatResponse (Pydantic)
+   ↓
+JSON Response
+```
