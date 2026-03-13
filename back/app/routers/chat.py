@@ -1,69 +1,87 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 import httpx
 import json
 import os
 from .. import models, schemas, database
+# 💡 두 가지 검색 함수 모두 임포트
+from ..rag import search_documents, search_web
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
-
-# docker-compose.yml에서 설정한 Ollama 주소
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://host.docker.internal:11434")
 
 
-@router.post("/", response_model=schemas.ChatResponse)
-async def chat_with_ai(
+@router.post("/stream")
+async def chat_stream_with_ai(
         request: Request,
         chat_req: schemas.ChatRequest,
         db: Session = Depends(database.get_db)
 ):
-    # 전역 상태에 저장해둔 Redis 클라이언트 가져오기
     redis = request.app.state.redis
     cache_key = f"chat_context:{chat_req.session_id}"
 
-    # 1. 사용자 메시지를 SQLite에 영구 저장
     user_msg = models.ChatMessage(session_id=chat_req.session_id, role="user", content=chat_req.message)
     db.add(user_msg)
     db.commit()
 
-    # 2. Redis에서 이전 대화 맥락(Context) 가져오기
-    cached_history = await redis.get(cache_key)
+    # 💡 [하이브리드 RAG 1단계] 내부 Vector DB 검색
+    db_context_list = search_documents(chat_req.message)
+    db_context_str = "\n- ".join(db_context_list) if db_context_list else "관련 내부 지식 없음"
 
+    # 💡 [하이브리드 RAG 2단계] 외부 웹 실시간 검색
+    web_context_str = search_web(chat_req.message)
+
+    # 💡 [하이브리드 RAG 3단계] 강력한 시스템 프롬프트 주입
+    system_content = f"""당신은 {chat_req.persona}입니다. 한국어로 자연스럽고 친절하게 답변해주세요.
+아래 제공된 [내부 데이터베이스 지식]과 [실시간 웹 검색 정보]를 모두 분석하여 답변하세요.
+만약 정보가 겹치거나 다를 경우, [내부 데이터베이스 지식]을 최우선으로 신뢰하여 기재하세요.
+
+[내부 데이터베이스 지식]
+{db_context_str}
+
+[실시간 웹 검색 정보]
+{web_context_str}
+"""
+
+    cached_history = await redis.get(cache_key)
     if cached_history:
         messages = json.loads(cached_history)
+        messages[0] = {"role": "system", "content": system_content}
     else:
-        # 이전 대화가 없다면 시스템 프롬프트(페르소나) 초기화
-        messages = [{"role": "system", "content": f"당신은 {chat_req.persona}입니다. 한국어로 자연스럽고 명확하게 답변해주세요."}]
+        messages = [{"role": "system", "content": system_content}]
 
-    # 현재 사용자의 질문 추가
     messages.append({"role": "user", "content": chat_req.message})
 
-    # 3. Ollama (로컬 LLM) API 호출
-    async with httpx.AsyncClient() as client:
-        try:
-            # gemma3:4b 모델 사용 (원하는 모델로 변경 가능)
-            response = await client.post(
-                f"{OLLAMA_URL}/api/chat",
-                json={"model": "gemma3:4b", "messages": messages, "stream": False},
-                timeout=60.0
-            )
-            response.raise_for_status()
-            ai_reply = response.json()["message"]["content"]
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Ollama 연동 오류: {str(e)}")
+    # 3. 제너레이터(Generator) 함수를 통한 스트리밍 처리
+    async def generate_response():
+        nonlocal messages
+        full_reply = ""
 
-    # 4. AI 응답을 SQLite에 영구 저장
-    ai_msg = models.ChatMessage(session_id=chat_req.session_id, role="assistant", content=ai_reply)
-    db.add(ai_msg)
-    db.commit()
+        async with httpx.AsyncClient() as client:
+            async with client.stream(
+                    "POST", f"{OLLAMA_URL}/api/chat",
+                    json={"model": "gemma3:4b", "messages": messages, "stream": True},
+                    timeout=60.0
+            ) as response:
+                async for chunk in response.aiter_text():
+                    if chunk:
+                        try:
+                            data = json.loads(chunk)
+                            content = data.get("message", {}).get("content", "")
+                            full_reply += content
+                            yield content
+                        except json.JSONDecodeError:
+                            continue
 
-    # 5. Redis 컨텍스트 업데이트 (토큰 절약을 위해 최근 10개 대화만 유지)
-    messages.append({"role": "assistant", "content": ai_reply})
-    if len(messages) > 11:
-        messages = [messages[0]] + messages[-10:]  # 시스템 프롬프트(0번) 유지 + 최근 10개
+        ai_msg = models.ChatMessage(session_id=chat_req.session_id, role="assistant", content=full_reply)
+        db.add(ai_msg)
+        db.commit()
 
-    # Redis에 1시간(3600초) 동안 저장 (메모리 관리)
-    await redis.set(cache_key, json.dumps(messages), ex=3600)
+        messages.append({"role": "assistant", "content": full_reply})
+        if len(messages) > 11:
+            messages = [messages[0]] + messages[-10:]
 
-    # 6. Flutter로 결과 반환
-    return schemas.ChatResponse(reply=ai_reply)
+        await redis.set(cache_key, json.dumps(messages), ex=3600)
+
+    return StreamingResponse(generate_response(), media_type="text/event-stream")

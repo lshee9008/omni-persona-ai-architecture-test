@@ -1,30 +1,35 @@
+import 'dart:convert';
 import 'package:dio/dio.dart';
-import '../models/chat_message.dart';
 
 class ApiService {
   final Dio _dio = Dio();
-
   final String baseUrl = 'http://localhost:8000';
 
-  Future<String> sendMessage(String sessionId, String message) async {
+  // 일반 응답 대신 Stream<String>을 반환하도록 수정
+  Stream<String> sendMessageStream(
+    String sessionId,
+    String message,
+    String persona,
+  ) async* {
     try {
       final response = await _dio.post(
-        '$baseUrl/chat/',
+        '$baseUrl/chat/stream',
         data: {
           'session_id': sessionId,
           'message': message,
-          'persona': '친절하고 유능한 AI 어시스턴트',
+          'persona': persona, // 선택된 페르소나 전달
         },
+        // 통신 타입을 stream으로 지정
+        options: Options(responseType: ResponseType.stream),
       );
 
-      if (response.statusCode == 200) {
-        return response.data['reply'];
-      } else {
-        throw Exception('API 통신 실패');
+      // 서버에서 들어오는 바이트 데이터를 문자열로 변환하여 Yield
+      final stream = response.data.stream;
+      await for (final chunk in stream) {
+        yield utf8.decode(chunk);
       }
     } catch (e) {
-      print('에러 발생: $e');
-      return "오류가 발생했습니다. 서버 연결을 확인해주세요.";
+      yield "오류가 발생했습니다.";
     }
   }
 }

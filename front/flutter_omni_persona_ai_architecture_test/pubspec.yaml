@@ -39,6 +39,7 @@ dependencies:
   hive: ^2.2.3              # 로컬 DB (Phase 4에서 사용)
   hive_flutter: ^1.1.0      # Hive의 Flutter 확장
   uuid: ^4.3.3              # 고유 세션 ID 생성용
+  flutter_markdown: ^0.7.7+1
 
 dev_dependencies:
   flutter_test:

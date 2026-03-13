@@ -4,6 +4,17 @@ import 'package:uuid/uuid.dart';
 import '../models/chat_message.dart';
 import '../services/api_service.dart';
 
+// 선택된 페르소나 상태 관리
+final personaProvider = StateProvider<String>((ref) => '친절한 어시스턴트');
+
+// 페르소나 목록
+final personaList = [
+  '친절한 어시스턴트',
+  '엄격한 시니어 코드 리뷰어',
+  '유쾌한 원어민 영어 튜터',
+  '창의적인 마케팅 카피라이터',
+];
+
 final apiServiceProvider = Provider((ref) => ApiService());
 final sessionIdProvider = Provider((ref) => const Uuid().v4());
 
@@ -29,25 +40,43 @@ class ChatNotifier extends StateNotifier<List<ChatMessage>> {
     _chatBox.add(message); // 로컬 DB에 추가
   }
 
-  Future<void> sendMessage(String text) async {
+  Future<void> sendMessage(String text, String currentPersona) async {
     if (text.trim().isEmpty) return;
 
-    // 1. 사용자 메시지 추가 및 저장
     final userMessage = ChatMessage(role: 'user', content: text);
-    _addMessageAndSave(userMessage);
+    _addMessageAndSave(userMessage); // 사용자 메시지 저장
 
-    isLoading = true;
+    // AI가 대답할 빈 메시지 박스 미리 생성 (UI에 빈 말풍선 띄우기)
+    int aiMessageIndex = state.length;
+    _addMessageAndSave(ChatMessage(role: 'assistant', content: ''));
 
-    // 2. 백엔드(FastAPI) 호출
     final apiService = ref.read(apiServiceProvider);
     final sessionId = ref.read(sessionIdProvider);
 
-    final aiReply = await apiService.sendMessage(sessionId, text);
+    String fullReply = "";
 
-    // 3. AI 응답 추가 및 저장
-    isLoading = false;
-    final aiMessage = ChatMessage(role: 'assistant', content: aiReply);
-    _addMessageAndSave(aiMessage);
+    // Stream 데이터 구독 시작
+    await for (final chunk in apiService.sendMessageStream(
+      sessionId,
+      text,
+      currentPersona,
+    )) {
+      fullReply += chunk; // 들어오는 글자를 계속 이어붙임
+
+      // Riverpod 상태 업데이트 (UI에 타이핑 효과 발생)
+      final updatedMessages = List<ChatMessage>.from(state);
+      updatedMessages[aiMessageIndex] = ChatMessage(
+        role: 'assistant',
+        content: fullReply,
+      );
+      state = updatedMessages;
+    }
+
+    // 통신이 완전히 끝나면 최종 결과물을 Hive(로컬 DB)에 덮어쓰기 업데이트
+    _chatBox.putAt(
+      aiMessageIndex,
+      ChatMessage(role: 'assistant', content: fullReply),
+    );
   }
 
   // (선택 사항) 대화 기록 초기화 기능

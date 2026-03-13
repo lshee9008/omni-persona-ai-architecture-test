@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   api:
     build: ./back
@@ -8,9 +6,26 @@ services:
       - "8000:8000"
     depends_on:
       - redis
-      - ollama
     environment:
       - REDIS_URL=redis://redis:6379
-      - OLLAMA_URL=http://ollama:11434
+      # 💡 핵심: Docker 안에서 Mac 본체의 Ollama(포트 11434)로 접속하는 주소
+      - OLLAMA_URL=http://host.docker.internal:11434
     volumes:
       - ./back:/app
+
+  redis:
+    image: redis:alpine
+    container_name: redis_cache
+    ports:
+      - "6379:6379"
+
+  ollama:
+    image: ollama/ollama
+    container_name: ollama_llm
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+volumes:
+  ollama_data:
