@@ -10,6 +10,7 @@ services:
       - REDIS_URL=redis://redis:6379
       # 💡 핵심: Docker 안에서 Mac 본체의 Ollama(포트 11434)로 접속하는 주소
       - OLLAMA_URL=http://host.docker.internal:11434
+      - TAVILY_API_KEY=${TAVILY_API_KEY}
     volumes:
       - ./back:/app
 
